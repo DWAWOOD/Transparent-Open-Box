@@ -1,0 +1,159 @@
+#TOB Stage 1. This code performs a looped leave-one-out analysis with TOB Stage 1 function
+#For TOB algorithm formulas see: Wood, 2019: DOI: 10.1007/s40808-018-0543-9
+#TOB algorithm was originally proposed by Wood, 2018, DOI: 10.26804/ager.2018.02.04  
+import time
+tic = time.perf_counter()  # begin program timer
+import pandas as pd
+import numpy as np
+from sklearn.metrics import r2_score, mean_squared_error,mean_absolute_error, matthews_corrcoef
+from math import sqrt  # for Euclidian distance calculation
+import os
+os.chdir("source directory") # change to directory where data file is located
+#
+#Read in data from.csv in columns with first line as headers
+dataset = pd.read_csv('XXXXX.csv')  # specify the name of the dataset csv file 
+X = dataset.iloc[:, :-1].values # X is a numpy array
+y = dataset.iloc[:, -1].values # y is a numpy array
+print(dataset.head(10))
+print(X.shape)
+print(y.shape)
+N = 11 # number of independent variables (first column in .csv is record number)
+M = 730 # number of data records (number of rows in .csv after header)
+P = 2 # Minkowski distance (2 = Euclidian, uses squared distance; 1 = Manhattan, uses absolute distance).
+#The original TOB algorithm just set P=2. Here, a choice is provided to assign P=1 or P=2
+Q = 10 # Number of matching records to use (Q=10 for TOB Stage 1)
+print("P value = ",P," ;Q value = ",Q)
+W = np.zeros((N+1))
+W=[1,1,1,1,1,1,1,1,1,1,1,0] # set up for 11 independent variables with dependent variable in right-side column
+#
+# NB: This version assumes input variables are normalised but dependent variable is not
+#
+def tobstage1_calc (X, opts):
+    TestAll = X
+    N= opts['n']
+    M= opts['m']
+    P= opts['p']
+    Q= opts['q']
+    W= opts['w']
+    topmtchbyrow = np.zeros((150,M))
+    distance = np.zeros ((M,M))
+    distval = np.zeros ((M,M))
+    pred_test = np.zeros ((M))
+    pred_test_denorm = np.zeros ((M))
+    y_denorm = np.zeros ((M))
+    for j in range (len(X)):
+          for k in range (len(TestAll)):
+                  for i in range(N):
+                        if P ==2:
+                            distance[j][k]+=W[i]*(X[j][i+1]-TestAll[k][i+1])**2 # includes weights
+                            distval[j][k]+=W[i]*(X[j][i+1]-TestAll[k][i+1])**2 # records values
+                        else:
+                            distance[j][k]+=W[i]*abs(X[j][i+1]-TestAll[k][i+1])**1 # includes weights
+                            distval[j][k]+=W[i]*abs(X[j][i+1]-TestAll[k][i+1])**1 # records values
+    # distval matrix preserves the distance values for the P value selected
+    #np.savetxt('p1pdistval.csv',distval,fmt='%f', delimiter=',')#can print values to file 
+    toc = time.perf_counter()
+    print()
+    print(f"Variable errors determined in {toc - tic:0.4f} seconds")
+    #Rank the distances in ascending order
+    from scipy.stats import rankdata # this ranks array with just one line
+    for k in range (M):
+      distance[:,k] = rankdata(distance[:,k], method='ordinal') # ordinal gives ties consecutive numbers
+    #np.savetxt('distance3.csv',distance,fmt='%f', delimiter=',') # svaes distance to file for checking
+    #
+    # Identify the top 10 (or other up to 25) ranked matches  (but excluding the first which is a self match)
+    #
+    for k in range (len(TestAll)):
+          for j in range (len(X)):
+              for i in range (2,26,1):
+                   if distance[j,k] == i: topmtchbyrow[i-1,k] = j+1
+                 #if distance[j,k] == 3: topmtchbyrow[2,k] = j+1
+
+    for k in range (len(TestAll)):   
+          topmtchbyrow[0,k] =TestAll[k][0] # this places test set record numbers in first row
+          topmtchbyrow[146,k] =y[k] # this places actual test set dependent variable values in  specified row
+
+    for k in range (len(TestAll)): #This plots top 25 matching record numbers
+          for j in range (24):
+                i = int(topmtchbyrow[1+j][k])-1 #need to convert to integer to use as an index value
+                topmtchbyrow[j+30,k] = X[i,0] #25 matching record numbers
+                topmtchbyrow[j+120,k] = y[i] #25 matching record dependent variable numbers
+
+    for k in range (len(TestAll)):
+          for j in range (24):
+                i = int(topmtchbyrow[1+j][k])-1 #converts to integer to use as an index value
+                topmtchbyrow[j+60,k] = distval[i,k]
+
+    #Determine F values (contribution each match makes to prediction) For Q (Q=10 for Stage 1)
+    for k in range (len(TestAll)):
+          for j in range (Q):
+                topmtchbyrow[86,k]+=topmtchbyrow[60+j,k]
+
+    for k in range (len(TestAll)):
+          for j in range (Q):
+                if topmtchbyrow[60+j,k]==0: # needed to avoid dividing by zero
+                       topmtchbyrow[88+j,k]==0
+                else:
+                       topmtchbyrow[88+j,k]=topmtchbyrow[86,k]/topmtchbyrow[60+j,k]
+
+    for k in range (len(TestAll)):
+          for j in range (Q):
+                topmtchbyrow[100,k]+=topmtchbyrow[88+j,k]
+
+    for k in range (len(TestAll)):
+          for j in range (Q):
+                 if topmtchbyrow[100,k]==0: # needed to avoid dividing by zero
+                       topmtchbyrow[102+j,k]==0
+                 else:
+                       topmtchbyrow[102+j,k]=topmtchbyrow[88+j,k]/topmtchbyrow[100,k]
+    #topmtchrow [102,k] down includes the F values that sum to 1 for alloting match contributions
+
+    # Calculate TOB Stage 1 predictions
+    for k in range (len(TestAll)):
+          for j in range (Q):
+                topmtchbyrow[145,k]+=topmtchbyrow[102+j,k]*topmtchbyrow[120+j,k]
+                pred_test[k]=topmtchbyrow[145,k]
+           
+    #Calculate error metrics
+    mse_TOB1=mean_squared_error(y,pred_test)
+    mae_TOB1 = mean_absolute_error(y, pred_test)
+    rmse_TOB1= np.sqrt(mse_TOB1)
+    r2TOB1=r2_score(y,pred_test)
+    
+    
+    TOB1error ={'rmse': rmse_TOB1, 'mae': mae_TOB1, 'r2': r2TOB1, 'w': W}
+    return TOB1error
+
+for i in range (N+1):
+      if i ==0 : W =[0,1,1,1,1,1,1,1,1,1,1]  # leave-one-out loop begins
+      if i ==1 : W =[1,0,1,1,1,1,1,1,1,1,1]
+      if i ==2 : W =[1,1,0,1,1,1,1,1,1,1,1]
+      if i ==3 : W =[1,1,1,0,1,1,1,1,1,1,1]
+      if i ==4 : W =[1,1,1,1,0,1,1,1,1,1,1]
+      if i ==5 : W =[1,1,1,1,1,0,1,1,1,1,1]
+      if i ==6 : W =[1,1,1,1,1,1,0,1,1,1,1]
+      if i ==7 : W =[1,1,1,1,1,1,1,0,1,1,1]
+      if i ==8 : W =[1,1,1,1,1,1,1,1,0,1,1]
+      if i ==9 : W =[1,1,1,1,1,1,1,1,1,0,1]
+      if i ==10 : W =[1,1,1,1,1,1,1,1,1,1,0]
+      if i ==11 : W =[1,1,1,1,1,1,1,1,1,1,1]  #loop ends by including all variables
+      #bundle key input controls into opts
+      opts ={'n':N, 'm':M, 'p':P, 'q':Q, 'w':W}
+      # Call tob stage 2 function
+      res_errTOB1 = tobstage1_calc (X, opts)
+
+      # Prints returned error metric values for each run of the loop 
+      print() 
+      print (" Stage 1 Function Returns RMSE= ",res_errTOB1 ['rmse'])
+      print (" Stage 1 Function Returns MAE= ",res_errTOB1  ['mae'])
+      print (" Stage 1 Function Returns R2= ",res_errTOB1  ['r2'])
+      print (" Stage 1 Features included= ",res_errTOB1  ['w'])
+#
+# Final execution time
+#
+toc = time.perf_counter()
+print()
+print ("P distance = ",P," ;Q value = ",Q)
+np.set_printoptions(formatter={'float': lambda x: "{0:0.4f}".format(x)})
+print ("W weight values = ", W[1:11])
+print(f"Program executed in {toc - tic:0.4f} seconds")
