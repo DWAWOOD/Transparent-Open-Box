@@ -1,0 +1,215 @@
+#TOB Stage 2 data matching: varies Q (from 2 to 10) and input variable weights Wi (from 0 to 1)
+#For TOB algorithm formulas see: Wood, 2019: DOI: 10.1007/s40808-018-0543-9
+#TOB algorithm was originally proposed by David A. Wood, 2018, DOI: 10.26804/ager.2018.02.04 
+#Configured for continuous dependent variable distribution.
+#Works for categorical dependent variable distribution if categories are expressed numerically.
+#Note this code applies TOB Stage 2 code as a function with an optimizer to optimize input TOB Stage 1 solution
+import time
+tic = time.perf_counter()  # begin program timer
+import pandas as pd
+import numpy as np
+from sklearn.metrics import r2_score, mean_squared_error,mean_absolute_error, matthews_corrcoef
+import os
+os.chdir("Data Directory")# place directory path for input file in this statement
+#
+#Read in data from.csv in columns with first line as headers
+dataset = pd.read_csv('XXXXX.csv')  # specify the name of the dataset csv file
+#This code assumes all variables in the input file are normalized (-1 to +1 value range) in the input file
+X = dataset.iloc[:, :].values # X is a numpy array with all the data from the input file
+print(X.shape)
+print(X.dtype)
+M = int(X[0,0]) # number of data records in input file being evaluated
+N = int(X[0,1]) # number of independent variables (second column in .csv is record number)
+Q = int(X[0,2]) # from output of TOB Stage 1 evaluation (usually TOB Stage 1 Q=10)
+W = np.zeros((N+1))
+ymin = X[0,3] # minimum value of actual dependent variable value distribution
+ymax = X[0,4] # maximum value of actual dependent variable value distribution
+P = 1 # Distance Options (P = 1 use absolute distance; P = 2 use squared distance)
+print("input values used to initiate the TOB Stage 2 optimizer model:") 
+print("M= :",M, ", N= :",N, ", P= :",P, ", Q= :",Q)
+np.set_printoptions(formatter={'float': lambda x: "{0:0.4f}".format(x)})
+print("Weights matrix: ",W)
+#
+def tobstage2_calc (W):
+    dataset = pd.read_csv('NEE730TOBStage2InputP1.csv')
+    X = dataset.iloc[:, :].values # X is a numpy array with all the data from the input file
+    TestAll = X
+    N=11
+    M=730
+    P=1
+    #Append extra 10 columns to X to make TOB2
+    AddCols = np.zeros((11*M+2,10))# can also use np.ones()
+    TOB2=np.c_[X,AddCols] # this works but need to get row length of two arrays to match
+    #np.savetxt('TOB2.csv',TOB2,fmt='%f', delimiter=',') # saves input part of TOB2 matrix
+    #
+    #Update Q and weights
+    #
+    Q = int(W[0]+0.5)  # need to convert W[0] into an integer all elements in W array are floats
+    TOB2[0,2]=Q
+    #Optional exclude certain features if required by setting W[i] equal to zero here.
+    # W[1]=0 # This line would exclude the first input variable from the optimization solution
+    for j in range (1,N+1):
+          TOB2[1,1+j] =W[j]
+    #
+    # Calculate distances on unweighted matrix
+    #
+    for j in range (0,M):
+          for k in range (2,N+2):
+                for i in range (1,11):
+                       if P ==2:
+                           TOB2[2+j*11+i,k] = (TOB2[2+j*11,k] -TOB2[2+j*11+i,k])**P
+                       else:
+                           TOB2[2+j*11+i,k] = abs(TOB2[2+j*11,k] -TOB2[2+j*11+i,k])**1
+                   
+    #
+    # Apply Q and W to TOB2 distance matrix
+    #
+    for j in range (0,M):
+          for k in range (2,N+2):
+                for i in range (1,11):
+                       TOB2[2+j*11+i,k] = TOB2[2+j*11+i,k]* W[k-1]
+                       if Q<i: TOB2[2+j*11+i,k] = 0
+
+    #
+    # Calculate sum of weighted variable distances for each matching data record
+    #
+    for j in range (0,M):
+          for k in range (2,N+2):
+                for i in range (1,11):
+                       TOB2[2+j*11+i,N+3] = TOB2[2+j*11+i,N+3]+ TOB2[2+j*11+i,k]
+
+    #
+    # Combine sums of all weighted variable distances for each data record being predicted
+    # These values are referred to as "sigma sums"
+    #
+    for j in range (0,M):
+          for i in range (1,11):
+                 TOB2[2+j*11,N+3] =  TOB2[2+j*11,N+3] + TOB2[2+j*11+i,N+3]
+    #
+    # Calculate relative contribuion weights of each matching data record to prediction
+    # Divide sigma sums by sum of weighted distances each matching if that value>0 
+    #
+    for j in range (0,M):
+          for i in range (1,11):
+                if TOB2[2+j*11+i,N+3]<0.00000001: # needed to avoid dividing by zero
+                       TOB2[2+j*11+i,N+4]=TOB2[2+j*11,N+3] /0.0000001              
+                else:
+                 TOB2[2+j*11+i,N+4] =  TOB2[2+j*11,N+3] / TOB2[2+j*11+i,N+3]
+          for i in range (1,11):
+                if i>Q: TOB2[2+j*11+i,N+4]=0  # this is needed to stop the other zeros contributing
+    #
+    # Calculate sum of matching variable contribution weights
+    #
+    for j in range (0,M):
+          for i in range (1,11):
+                 TOB2[2+j*11,N+4] =  TOB2[2+j*11,N+4] + TOB2[2+j*11+i,N+4]
+    #
+    # Adjust matching data record contribution weights to sum to 1
+    # Divide each relative conribution weight by sum of contribution weights if it is >0
+    #
+    for j in range (0,M):
+          for i in range (1,11):
+                if TOB2[2+j*11,N+4]==0: # needed to avoid dividing by zero
+                       TOB2[2+j*11+i,N+5]==0
+                else:
+                 TOB2[2+j*11+i,N+5] =  TOB2[2+j*11+i,N+4] /TOB2[2+j*11,N+4]
+    #
+    # Calculate sum of adjusted data record conribution weights. This should now sum to 1
+    #
+    for j in range (0,M):
+          for i in range (1,11):
+                 TOB2[2+j*11,N+5] =  TOB2[2+j*11,N+5] + TOB2[2+j*11+i,N+5]
+    #
+    # Calculate weighted prediction contributions of the matching records (normalized)
+    #
+    for j in range (0,M):
+          for i in range (1,11):
+                 TOB2[2+j*11+i,N+6] =  TOB2[2+j*11+i,N+2] * TOB2[2+j*11+i,N+5]
+    #
+    # Calculate sum of the weighted predictions value conributions to the prediction
+    #
+    for j in range (0,M):
+          for i in range (1,11):
+                 TOB2[2+j*11,N+6] =  TOB2[2+j*11,N+6] + TOB2[2+j*11+i,N+6]
+
+    #
+    # Calculate denormalized data record prediction and actuals values
+    # This assumes that values have been input in normalized form (-1 to +1)
+    #
+    for j in range (0,M):
+                 TOB2[2+j*11,N+7] =  (TOB2[2+j*11,N+6] +1)*((ymax-ymin)/2)+ymin
+                 TOB2[2+j*11,N+8] =  (TOB2[2+j*11,N+2] +1)*((ymax-ymin)/2)+ymin
+                 TOB2[2+j*11,N+9] = (TOB2[2+j*11,N+8]-TOB2[2+j*11,N+7])**2 #Squared errors for RMSE
+                 TOB2[2+j*11,N+10] = abs(TOB2[2+j*11,N+8]-TOB2[2+j*11,N+7]) #Absolute erros for MAE
+
+
+    #
+    # Calculate and save to TOB2 prediction performance metrics MSE, RMSE and MAE
+    #
+    for j in range (0,M):
+           TOB2[1,N+9] = TOB2[1,N+9] +TOB2[2+j*11,N+9]
+           TOB2[1,N+10] = TOB2[1,N+10] +TOB2[2+j*11,N+10]
+
+    TOB2[1,N+9] = TOB2[1,N+9]/M # mse
+    TOB2[0,N+9] = TOB2[1,N+9]**0.5 # rmse
+    TOB2[1,N+10] = TOB2[1,N+10]/M # mae
+    mseTOB2=TOB2[1,N+9]
+    rmseTOB2=TOB2[0,N+9]
+    maeTOB2 =TOB2[1,N+10]
+    #
+    # Create arrays for y_act and y_pred
+    #
+    TestTOB2Res = np.zeros((M,3))
+    y_act =np.zeros((M,1))
+    y_pred =np.zeros((M,1))
+    y_name =np.zeros((M,1)) 
+    for j in range (0,M):
+           y_act[j] = TOB2[2+j*11,N+8] # Actual denormalised
+           y_pred[j] = TOB2[2+j*11,N+7] # predicted denormalised
+           y_name[j] = TOB2[2+j*11,0]# test set data record names
+    for j in range (0,M):
+         TestTOB2Res[j,0] = y_name[j]
+         TestTOB2Res[j,1] = y_act[j]
+         TestTOB2Res[j,2] = y_pred[j] 
+    #Calculate denormalised error metrics using SciKit Learn functions
+    mse_TOB2testDN=mean_squared_error(y_act,y_pred)
+    mae_TOB2testDN = mean_absolute_error(y_act,y_pred)
+    rmse_TOB2testDN= np.sqrt(mse_TOB2testDN)
+    r2TOB2testDN=r2_score(y_act,y_pred)
+    #print() # prints blank line
+    #print("SkLearn Error Functions:")
+    #print("RMSE TOB2TestDN: ",rmse_TOB2testDN," units?")
+    #print("MAE TOB2TestDN: ",mae_TOB2testDN," units?")
+    #print("R squared TOB2TestDN ", r2TOB2testDN)
+
+    y = rmse_TOB2testDN # Use this to return just RMSE value as optimizer output
+    #y = mae_TOB2testDN # Use this to return just MAE value as optimizer output
+    return y
+
+# Run Particle Swarm Optimizer (PSO) from scikit-opt using this TOB Stage 2 Function
+# see this URL for PSO and other optimizer details https://github.com/guofei9987/scikit-opt
+# PSO, simulated annealing, genetic algorithm, and differential evolution all work well
+from sko.PSO import PSO
+# Optimizer call format specified by scikit-opt
+pso = PSO(func=tobstage2_calc, n_dim=12, pop=50, max_iter=30, lb=[2,0,0,0,0,0,0,0,0,0,0,0],
+          ub=[10,1,1,1,1,1,1,1,1,1,1,1], w=0.8, c1=0.5, c2=0.5)
+#Try pop values beween 50 and 100, and max_iter values between 30 and 100
+
+pso.run()
+np.set_printoptions(formatter={'float': lambda x: "{0:0.4f}".format(x)})
+print('best_W is: ', pso.gbest_x, 'best_y (RMSE) is: ', pso.gbest_y)
+
+# Plot the results for each optimizer iteration
+import matplotlib.pyplot as plt
+
+plt.plot(pso.gbest_y_hist)
+plt.ion()
+plt.show()
+
+#
+# Final execution time
+#
+toc = time.perf_counter()
+print()
+print ("P distance = ",P)
+print(f"Program executed in {toc - tic:0.4f} seconds")
