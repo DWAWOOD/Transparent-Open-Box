@@ -1,0 +1,199 @@
+#TOB Stage 1 data matching: applies Q=10 and equal input variable weights (Wi)
+#For TOB algorithm formulas see: Wood, 2019: DOI: 10.1007/s40808-018-0543-9
+#TOB algorithm was originally proposed by David A. Wood, 2018, DOI: 10.26804/ager.2018.02.04 
+#Configured for continuous dependent variable distribution.
+#Works for categorical dependent variable distribution if categories are expressed numerically
+#This code is useful for detailed dataset interrogation as well as prediction 
+import time
+tic = time.perf_counter()  # begin program timer
+import pandas as pd
+import numpy as np
+from sklearn.metrics import r2_score, mean_squared_error,mean_absolute_error
+from math import sqrt 
+import os
+os.chdir("source directory") # change to directory where data file is located
+#
+#Read in data from.csv in columns with first line as headers
+dataset = pd.read_csv('XXXXX.csv')  # specify the name of the dataset csv file
+# This code assumes all variables in the input file are normalized (-1 to +1 value range) in input file
+X = dataset.iloc[:, :-1].values # X is a numpy array
+y = dataset.iloc[:, -1].values # y is a numpy array
+print(dataset.head(10))
+print(X.shape)
+print(y.shape)
+N = 11 # number of independent variables (first column in .csv is record number)
+M = 730 # number of data records
+P = 1 # Distance options (1 = uses absolute distance; 2 = uses squared distance)
+Q = 10 # Number of matching records to use (Q=10 for TOB Stage 1)
+print("P value = ",P," ;Q value = ",Q)
+W = np.zeros((N+1))
+W=[1,1,1,1,1,1,1,1,1,1,1,0] # assumes dataset has11 input variables with one dependen variable
+TestAll = X
+topmtchbyrow = np.zeros((150,M))
+distance = np.zeros ((M,M))
+distval = np.zeros ((M,M))
+pred_test = np.zeros ((M))
+pred_test_denorm = np.zeros ((M))
+y_denorm = np.zeros ((M))
+for j in range (len(X)):
+      for k in range (len(TestAll)):
+              for i in range(N):
+                    if P ==2:
+                       distance[j][k]+=W[i]*(X[j][i+1]-TestAll[k][i+1])**2 # includes weights
+                       distval[j][k]+=W[i]*(X[j][i+1]-TestAll[k][i+1])**2 # records values
+                    else:
+                       distance[j][k]+=W[i]*abs(X[j][i+1]-TestAll[k][i+1])**1 # includes weights
+                       distval[j][k]+=W[i]*abs(X[j][i+1]-TestAll[k][i+1])**1 # records values
+# distval preserves the distance values for the Pvalue seleced
+#np.savetxt('p1pdistval.csv',distval,fmt='%f', delimiter=',')
+toc = time.perf_counter()
+print()
+print(f"Variable errors determined in {toc - tic:0.4f} seconds")
+#Rank the distances in ascending order
+from scipy.stats import rankdata # this ranks array with just one line
+for k in range (M):
+  distance[:,k] = rankdata(distance[:,k], method='ordinal') # ordinal gives ties consecutive numbers
+#np.savetxt('distance3.csv',distance,fmt='%f', delimiter=',')
+#
+# Identifies the top 25 matching records for each record (excluding the first which is a self match)
+#
+for k in range (len(TestAll)):
+      for j in range (len(X)):
+          for i in range (2,26,1):
+               if distance[j,k] == i: topmtchbyrow[i-1,k] = j+1
+            
+for k in range (len(TestAll)):   
+      topmtchbyrow[0,k] =TestAll[k][0] # this places record numbers being predicted in the first row
+      topmtchbyrow[146,k] =y[k] # this places actual test set dependent variable values in specified row
+
+for k in range (len(TestAll)): #This plots top 25 matching record numbers
+      for j in range (24):
+            i = int(topmtchbyrow[1+j][k])-1 #need to convert to integer to use as an index value
+            topmtchbyrow[j+30,k] = X[i,0] #25 matching record numbers
+            topmtchbyrow[j+120,k] = y[i] #25 matching record dependent variable values
+
+for k in range (len(TestAll)):
+      for j in range (24):
+            i = int(topmtchbyrow[1+j][k])-1 #need to convert to integer to use as an index value
+            topmtchbyrow[j+60,k] = distval[i,k]
+
+#Determine F values (fractional contribution each match makes to prediction) For Q (Q=10 for Stage 1)
+#This applies inverse distance weighting
+for k in range (len(TestAll)):
+      for j in range (Q):
+            topmtchbyrow[86,k]+=topmtchbyrow[60+j,k]
+
+for k in range (len(TestAll)):
+      for j in range (Q):
+            if topmtchbyrow[60+j,k]==0: # needed to avoid dividing by zero
+                   topmtchbyrow[88+j,k]==0
+            else:
+                   topmtchbyrow[88+j,k]=topmtchbyrow[86,k]/topmtchbyrow[60+j,k]
+
+for k in range (len(TestAll)):
+      for j in range (Q):
+            topmtchbyrow[100,k]+=topmtchbyrow[88+j,k]
+
+for k in range (len(TestAll)):
+      for j in range (Q):
+             if topmtchbyrow[100,k]==0: # needed to avoid dividing by zero
+                   topmtchbyrow[102+j,k]==0
+             else:
+                   topmtchbyrow[102+j,k]=topmtchbyrow[88+j,k]/topmtchbyrow[100,k]
+#topmtchrow [102,k] down includes the F values that sum to 1 for allotting match contributions
+
+# Calculate TOB Stage 1 predictions (normalized)
+for k in range (len(TestAll)):
+      for j in range (Q):
+            topmtchbyrow[145,k]+=topmtchbyrow[102+j,k]*topmtchbyrow[120+j,k]
+            pred_test[k]=topmtchbyrow[145,k]
+           
+#Calculate normalised error metrics
+mse_TOB1test=mean_squared_error(y,pred_test)
+mae_TOB1test = mean_absolute_error(y, pred_test)
+rmse_TOB1test= np.sqrt(mse_TOB1test)
+r2TOB1test=r2_score(y,pred_test)
+print() # prints blank line
+print("RMSE TOB1Test: ",rmse_TOB1test," units?")
+print("MAE TOB1Test: ",mae_TOB1test," units?")
+print("R squared TOB1Test: ", r2TOB1test)
+
+# Denormalize predictions
+ymin = -9.0949 # enter min actual value of dataset dependent variable
+ymax = 3.3772 # enter max actual value of dataset dependent variable
+# To denorm from -1 to +1scale: Actval=(Normvalue+1)*((maxActvalue-minActvalue)/2) +minActvalue
+# To norm to -1 to +1 scale: Normval = 2 * ((ActVal - minActVal) / (maxActval - minActval)) - 1
+for k in range (len(TestAll)):
+      topmtchbyrow[147,k]=(pred_test[k]+1)*((ymax-ymin)/2)+ymin
+      topmtchbyrow[148,k]=(y[k]+1)*((ymax-ymin)/2)+ymin
+      pred_test_denorm[k]=topmtchbyrow[147,k]
+      y_denorm[k]=topmtchbyrow[148,k]
+
+#Calculate denormalised error metrics
+mse_TOB1testDN=mean_squared_error(y_denorm,pred_test_denorm)
+mae_TOB1testDN = mean_absolute_error(y_denorm,pred_test_denorm)
+rmse_TOB1testDN= np.sqrt(mse_TOB1testDN)
+r2TOB1testDN=r2_score(y_denorm,pred_test_denorm)
+print() # prints blank line
+print("DN means denormalized")
+print ("P distance = ",P," ;Q value = ",Q)
+print("RMSE TOB1TestDN: ",rmse_TOB1testDN," units?")
+print("MAE TOB1TestDN: ",mae_TOB1testDN," units?")
+print("R squared TOB1TestDN ", r2TOB1testDN)
+      
+np.savetxt('p1ptopmatchrow.csv',topmtchbyrow,fmt='%f', delimiter=',')
+#Tobstage 1 executes in 42.7 secs with this dataset
+# Need to add weights and controls for Q to work for TOB Stage 2
+# topmatchbyrow what i in each csv row:
+# row 149  actual dependent variable value denormalized
+# row 148 predicted dependent variable value denormalized
+# row 147  actual dependent variable value normalized
+# row 146 predicted dependent variable value normalized 
+# rows 120 to 144  dependent variable normvalue of top 25 matching records ranked
+# rows 103 to 112 contribution of each top 10 ranked matches to prediction
+# row 101 sums values  by column for rows  89 to 98
+# rows 89 to 98 for top 10 matches divided squared error into value for row 87 (For F calc)
+# row 87 sum of error each Q matching record makes to prediction (used for F calc)
+# rows 61 to 84 top 24 matching data records total sum of squares from record being matched 
+# rows 31 to 54 top 24 matching data record numbers by sample label numbers 
+# row 2 to 25 top 24 matching data record numbers by sequence position  
+# row 1 test record number for all M test records
+PrintStage2Inp=1
+if PrintStage2Inp==1:
+    Stage2Inp = np.zeros(((M*12)+3,N+3))
+    for k in range (len(TestAll)):
+          Stage2Inp[3+(11*k)][0] = topmtchbyrow [0][k] #record being matched
+          for j in range (10):
+               Stage2Inp[4+j+11*k][1] = topmtchbyrow [30+j][k] #top 10 matching records
+               Stage2Inp[4+j+11*k][0] = topmtchbyrow [102+j][k] # prediction contributions of top 10 matching records
+
+    for k in range (len(TestAll)): #This records top 10 matching record number variable values with dep variable
+          for j in range (10):
+            i = int(topmtchbyrow[1+j][k])-1 #need to convert to integer to use as an index value
+            Stage2Inp[4+j+11*k][N+2] = y[i] #dependent variable value of matching records
+            for v in range (N+1):
+                  Stage2Inp[4+j+11*k][v+1] = X[i,v] # all variable values in row for 10 matching record numbers
+    for k in range (len(TestAll)):
+           Stage2Inp[3+(11*k)][N+2] = y[k] # dependent variable of record being matched
+           for v in range (1,N+1,1):
+                  Stage2Inp[3+(11*k)][v+1] = X[k,v] # all variable values for record being matched
+    for v in range (1,N+1,1):
+           Stage2Inp[2][v+1] = W[v-1]
+    Stage2Inp[1][0] = M # number of data record
+    Stage2Inp[1][1] = N # number of input variables
+    Stage2Inp[1][2] = Q # number of top matching variables used (TOB1 by definition uses Q=10)
+    Stage2Inp[1][3] = ymin  # for denormalization
+    Stage2Inp[1][4] = ymax # for denormalization
+    Stage2Inp[1][5] = P #P=1 for absolute distances; P=2 for  squared distances
+    np.savetxt('stage2fmtP1.csv',Stage2Inp,fmt='%f', delimiter=',')
+    # Note: to use this ouput .csv file for input to TOB Stage 2 algorithm add data variable names to first row
+else:
+    PrintStage2Inp==1
+#
+# Final execution time
+#
+toc = time.perf_counter()
+print()
+print ("P distance = ",P," ;Q value = ",Q)
+print ("W weight for input variables = ", W[0:11])
+print(f"Program executed in {toc - tic:0.4f} seconds")
