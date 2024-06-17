@@ -1,12 +1,14 @@
 #TOB Stage 1. This code performs a looped leave-one-out analysis with TOB Stage 1 function
 #For TOB algorithm formulas see: Wood, 2019: DOI: 10.1007/s40808-018-0543-9
-#TOB algorithm was originally proposed by Wood, 2018, DOI: 10.26804/ager.2018.02.04  
+#TOB algorithm was originally proposed by Wood, 2018, DOI: 10.26804/ager.2018.02.04
+#Configured for continuous dependent variable distribution.
+#Works for categorical dependent variable distribution if categories are expressed numerically  
 import time
 tic = time.perf_counter()  # begin program timer
 import pandas as pd
 import numpy as np
-from sklearn.metrics import r2_score, mean_squared_error,mean_absolute_error, matthews_corrcoef
-from math import sqrt  # for Euclidian distance calculation
+from sklearn.metrics import r2_score, mean_squared_error,mean_absolute_error
+from math import sqrt 
 import os
 os.chdir("source directory") # change to directory where data file is located
 #
