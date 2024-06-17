@@ -19,7 +19,7 @@ print(X.shape)
 print(y.shape)
 N = 11 # number of independent variables (first column in .csv is record number)
 M = 730 # number of data records (number of rows in .csv after header)
-P = 2 # Minkowski distance (2 = Euclidian, uses squared distance; 1 = Manhattan, uses absolute distance).
+P = 2 # Distance measure used for data matching (P=1 uses absplute distance; P=2 = uses squared distance).
 #The original TOB algorithm just set P=2. Here, a choice is provided to assign P=1 or P=2
 Q = 10 # Number of matching records to use (Q=10 for TOB Stage 1)
 print("P value = ",P," ;Q value = ",Q)
@@ -106,7 +106,7 @@ def tobstage1_calc (X, opts):
                        topmtchbyrow[102+j,k]==0
                  else:
                        topmtchbyrow[102+j,k]=topmtchbyrow[88+j,k]/topmtchbyrow[100,k]
-    #topmtchrow [102,k] down includes the F values that sum to 1 for alloting match contributions
+    #topmtchrow [102,k] down includes the F values that sum to 1 for allotting match contributions
 
     # Calculate TOB Stage 1 predictions
     for k in range (len(TestAll)):
